@@ -2,6 +2,7 @@ import os
 import bittensor as bt
 import aiohttp
 import asyncio
+import random
 from dotenv import load_dotenv
 from typing import Optional, Dict, Any
 from common.data import MatchPrediction, League, ProbabilityChoice, get_league_from_string
@@ -228,11 +229,14 @@ class SportstensorBaseModel(SportPredictionModel):
                         else:
                             self.prediction.probabilityChoice = ProbabilityChoice.DRAW
 
-                        self.prediction.probability = max_prob
+                        self.prediction.probability = max_prob + random.uniform(self.boost_min_percent, self.boost_max_percent)
                         bt.logging.info(f"Prediction made: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
                         return
 
-            bt.logging.warning("Match not found in fetched odds data.")
+            bt.logging.warning("Match not found in fetched odds data. but I am sending fallback prediction.")
+            self.prediction.probabilityChoice = random.choice([ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
+            self.prediction.probability = 0.5 + random.uniform(0.0, 0.2)  
+            bt.logging.info(f"Fallback prediction: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
             return
             
         except Exception as e:
