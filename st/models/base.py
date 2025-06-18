@@ -72,7 +72,7 @@ class SportstensorBaseModel(SportPredictionModel):
     def __init__(self, prediction: MatchPrediction):
         super().__init__(prediction)
         self.boost_min_percent = 0.03
-        self.boost_max_percent = 0.10
+        self.boost_max_percent = 0.20
         self.probability_cap = 0.95
         self.max_retries = 3
         self.retry_delay = 0.5
@@ -235,7 +235,7 @@ class SportstensorBaseModel(SportPredictionModel):
 
             bt.logging.warning("Match not found in fetched odds data. but I am sending fallback prediction.")
             self.prediction.probabilityChoice = random.choice([ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
-            self.prediction.probability = 0.5 + random.uniform(0.0, 0.2)  
+            self.prediction.probability = 0.5 + random.uniform(0.0, 0.3)
             bt.logging.info(f"Fallback prediction: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
             return
             
