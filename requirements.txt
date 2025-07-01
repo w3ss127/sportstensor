@@ -4,3 +4,6 @@ scikit-learn
 wandb
 tabulate
 python-dotenv
+numpy
+aiohttp
+asyncio

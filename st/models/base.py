@@ -1,4 +1,6 @@
+import json
 import os
+import sys
 import bittensor as bt
 import aiohttp
 import asyncio
@@ -71,8 +73,8 @@ league_mapping = {
 class SportstensorBaseModel(SportPredictionModel):
     def __init__(self, prediction: MatchPrediction):
         super().__init__(prediction)
-        self.boost_min_percent = 0.03
-        self.boost_max_percent = 0.20
+        self.boost_min_percent = 0.1
+        self.boost_max_percent = 0.2
         self.probability_cap = 0.95
         self.max_retries = 3
         self.retry_delay = 0.5
@@ -139,6 +141,58 @@ class SportstensorBaseModel(SportPredictionModel):
         except Exception as e:
             bt.logging.error(f"Error converting odds to probabilities: {str(e)}")
             return None
+
+    def get_stats(self, hometeam, awayteam, json_path="storage/mlb.json"):
+
+        if not os.path.isfile(json_path):
+            raise FileNotFoundError(f"Stats file not found: {json_path}")
+
+        with open(json_path, "r") as f:
+            matches = json.load(f)
+
+        total_matches = 0
+        home_wins = 0
+        away_wins = 0
+        home_total_score = 0
+        away_total_score = 0
+        home_score_as_home = 0
+        away_score_as_away = 0
+
+        for match in matches:
+            # Check if this match is between the two teams (any order)
+            teams = {match["home_team"], match["away_team"]}
+            if {hometeam, awayteam} == teams:
+                total_matches += 1
+
+                # Assign scores
+                if match["home_team"] == hometeam:
+                    home_score = match["home_score"]
+                    away_score = match["away_score"]
+                    home_score_as_home += home_score
+                else:
+                    home_score = match["away_score"]
+                    away_score = match["home_score"]
+                    away_score_as_away += away_score
+
+                home_total_score += home_score
+                away_total_score += away_score
+
+                # Win/Loss
+                if home_score > away_score:
+                    home_wins += 1
+                elif away_score > home_score:
+                    away_wins += 1
+                # Draws can be handled if needed
+
+        return {
+            "total_matches": total_matches,
+            f"{hometeam}_wins": home_wins,
+            f"{awayteam}_wins": away_wins,
+            f"{hometeam}_total_score": home_total_score,
+            f"{awayteam}_total_score": away_total_score,
+            f"{hometeam}_score_as_home": home_score_as_home,
+            f"{awayteam}_score_as_away": away_score_as_away,
+        }
     
     async def make_prediction(self):
         """Synchronous wrapper for async prediction logic."""
@@ -182,18 +236,19 @@ class SportstensorBaseModel(SportPredictionModel):
             # Determine the region (optional customization for regions)
             region = "us,eu" if sport_key in ["baseball_mlb", "americanfootball_nfl", "basketball_nba"] else "uk,eu"
             
-            odds_data = await self.fetch_odds(sport_key, region)
+            # odds_data = await self.fetch_odds(sport_key, region)
+            odds_data = []
 
-            if not odds_data:
-                bt.logging.error("No odds data fetched.")
-                return self.prediction
+            # if not odds_data:
+            #     bt.logging.error("No odds data fetched.")
+            #     return self.prediction
+
+            home_team = self.map_team_name(self.prediction.homeTeamName)
+            away_team = self.map_team_name(self.prediction.awayTeamName)
 
             # Find the match
             for odds in odds_data:
-                home_team = self.map_team_name(self.prediction.homeTeamName)
-                away_team = self.map_team_name(self.prediction.awayTeamName)
-
-                if odds["home_team"] == home_team and odds["away_team"] == away_team:
+                if  odds["home_team"] == home_team and odds["away_team"] == away_team:
                     bookmaker = next((b for b in odds["bookmakers"] if b["key"] == "pinnacle"), None)
                     if not bookmaker:
                         bt.logging.error("No Pinnacle odds found")
@@ -232,11 +287,21 @@ class SportstensorBaseModel(SportPredictionModel):
                         self.prediction.probability = max_prob + random.uniform(self.boost_min_percent, self.boost_max_percent)
                         bt.logging.info(f"Prediction made: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
                         return
+            
+            stats = self.get_stats(home_team, away_team)
+            bt.logging.success(f"{stats}")
 
-            bt.logging.warning("Match not found in fetched odds data. but I am sending fallback prediction.")
             self.prediction.probabilityChoice = random.choice([ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
-            self.prediction.probability = 0.5 + random.uniform(0.0, 0.3)
-            bt.logging.info(f"Fallback prediction: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
+            self.prediction.probability = 0.6 + random.uniform(0.0, 0.3)
+
+            # json_result = self.prediction.model_dump_json(indent=2)
+            # with open("storage/miner_response.json", "w") as f:
+            #     json.dump(json_result, f, indent=2)
+            # bt.logging.info(f"Sent Prediction Successfully: {json_result}")
+            
+            bt.logging.success(
+                f"Match Prediction for {self.prediction.awayTeamName} at {self.prediction.homeTeamName} on {self.prediction.matchDate}: {self.prediction.probabilityChoice} ({self.prediction.get_predicted_team()}) with wp {round(self.prediction.probability, 4)}"
+            )
             return
             
         except Exception as e:

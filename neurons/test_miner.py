@@ -9,9 +9,9 @@ bt.logging.set_debug(True)
 
 
 async def mls():
-    matchDate = "2024-08-20"
+    matchDate = "2024-08-25"
     match_prediction = MatchPrediction(
-        matchId=1234,
+        matchId="9101",
         matchDate=dt.datetime.strptime(matchDate, "%Y-%m-%d"),
         sport=Sport.SOCCER,
         league=League.MLS,
@@ -32,12 +32,12 @@ async def mls():
 async def mlb():
     matchDate = "2024-08-25"
     match_prediction = MatchPrediction(
-        matchId=1234,
+        matchId="1234",
         matchDate=dt.datetime.strptime(matchDate, "%Y-%m-%d"),
         sport=Sport.BASEBALL,
         league=League.MLB,
-        homeTeamName="Los Angeles Dodgers",
-        awayTeamName="Oakland Athletics",
+        homeTeamName="Baltimore Orioles",
+        awayTeamName="Texas Rangers",
     )
 
     match_prediction = await make_match_prediction(match_prediction)
@@ -50,7 +50,7 @@ async def mlb():
 async def epl():
     matchDate = "2024-12-20"
     match_prediction = MatchPrediction(
-        matchId="0b25bc4bd29ca0cd5d4b8031a3a36480",
+        matchId="5678",
         matchDate=dt.datetime.strptime(matchDate, "%Y-%m-%d"),
         sport=Sport.SOCCER,
         league=League.EPL,
@@ -68,9 +68,9 @@ async def epl():
 async def nfl():
     matchDate = "2024-12-20"
     match_prediction = MatchPrediction(
-        matchId="d308633813328ef6c47859652c6970e2",
+        matchId="1121",
         matchDate=dt.datetime.strptime(matchDate, "%Y-%m-%d"),
-        sport=Sport.FOOTBALL,
+        sport=Sport.AMERICAN_FOOTBALL,
         league=League.NFL,
         homeTeamName="Los Angeles Chargers",
         awayTeamName="Denver Broncos",
@@ -89,7 +89,7 @@ async def nba():
     matchDate = "2025-02-20"
     match_predictions = [
         MatchPrediction(
-            matchId="d1fc26857f2ac88f58cb3b601c9dd88c",
+            matchId="3141",
             matchDate=dt.datetime.strptime(matchDate, "%Y-%m-%d"),
             sport=Sport.BASKETBALL,
             league=League.NBA,
@@ -116,8 +116,8 @@ async def nba():
     return match_predictions
 
 if __name__ == "__main__":
-    #asyncio.run(mlb())
+    asyncio.run(mlb())
     #asyncio.run(epl())
     #asyncio.run(mls())
     #asyncio.run(nfl())
-    asyncio.run(nba())
+    #asyncio.run(nba())
