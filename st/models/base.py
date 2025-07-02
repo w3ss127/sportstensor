@@ -5,6 +5,7 @@ import bittensor as bt
 import aiohttp
 import asyncio
 import random
+import math
 from dotenv import load_dotenv
 from typing import Optional, Dict, Any
 from common.data import MatchPrediction, League, ProbabilityChoice, get_league_from_string
@@ -36,7 +37,7 @@ mismatch_teams_mapping = {
     "Wolverhampton Wanderers": "Wolves",
     "Newcastle United": "Newcastle",
     "LA Galaxy": "L.A. Galaxy",
-    "Oakland Athletics": "Athletics",
+    # "Oakland Athletics": "Athletics",
 }
 
 SPORTS_TYPES = [
@@ -136,62 +137,176 @@ class SportstensorBaseModel(SportPredictionModel):
             return probabilities
         
         except Exception as e:
-            print(f"Error converting odds to probabilities: {str(e)}")
-            return None
-        except Exception as e:
             bt.logging.error(f"Error converting odds to probabilities: {str(e)}")
             return None
 
-    def get_stats(self, hometeam, awayteam, json_path="storage/mlb.json"):
-
+    def get_stats(self, hometeam, awayteam, json_path="storage/mlb.json", recent_n=10):
         if not os.path.isfile(json_path):
             raise FileNotFoundError(f"Stats file not found: {json_path}")
 
         with open(json_path, "r") as f:
             matches = json.load(f)
 
-        total_matches = 0
-        home_wins = 0
-        away_wins = 0
-        home_total_score = 0
-        away_total_score = 0
-        home_score_as_home = 0
-        away_score_as_away = 0
+        # Filter only head-to-head games
+        h2h_matches = [
+            m for m in matches
+            if {m["home_team"], m["away_team"]} == {hometeam, awayteam}
+        ]
 
-        for match in matches:
-            # Check if this match is between the two teams (any order)
-            teams = {match["home_team"], match["away_team"]}
-            if {hometeam, awayteam} == teams:
-                total_matches += 1
+        total_matches = len(h2h_matches)
+        team1_wins = team2_wins = 0
+        team1_total_score = team2_total_score = 0
+        team1_score_as_home = team2_score_as_away = 0
+        team1_wins_as_home = team1_wins_as_away = 0
+        team2_wins_as_home = team2_wins_as_away = 0
+        margins_team1 = []
+        margins_team2 = []
+        win_streak_team1 = win_streak_team2 = 0
 
-                # Assign scores
-                if match["home_team"] == hometeam:
-                    home_score = match["home_score"]
-                    away_score = match["away_score"]
-                    home_score_as_home += home_score
+        # For recent stats
+        recent_matches = h2h_matches[-recent_n:] if total_matches >= recent_n else h2h_matches
+        
+        recent_team1_wins = recent_team2_wins = 0
+        recent_team1_score = recent_team2_score = 0
+
+        # For win streak
+        last_winner = None
+
+        for match in h2h_matches:
+            home = match["home_team"]
+            away = match["away_team"]
+            home_score = match["home_score"]
+            away_score = match["away_score"]
+
+            # Assign team1/team2
+            if home == hometeam:
+                team1_score = home_score
+                team2_score = away_score
+                team1_score_as_home += home_score
+                team2_score_as_away += away_score
+            else:
+                team1_score = away_score
+                team2_score = home_score
+                team2_score_as_away += away_score
+                team1_score_as_home += home_score  # This is rare, but for completeness
+
+            team1_total_score += team1_score
+            team2_total_score += team2_score
+
+            # Win logic
+            if team1_score > team2_score:
+                team1_wins += 1
+                margins_team1.append(team1_score - team2_score)
+                if home == hometeam:
+                    team1_wins_as_home += 1
                 else:
-                    home_score = match["away_score"]
-                    away_score = match["home_score"]
-                    away_score_as_away += away_score
+                    team1_wins_as_away += 1
+                if last_winner == hometeam or last_winner is None:
+                    win_streak_team1 += 1
+                    win_streak_team2 = 0
+                else:
+                    win_streak_team1 = 1
+                    win_streak_team2 = 0
+                last_winner = hometeam
+            else:
+                team2_wins += 1
+                margins_team2.append(team2_score - team1_score)
+                if home == awayteam:
+                    team2_wins_as_home += 1
+                else:
+                    team2_wins_as_away += 1
+                if last_winner == awayteam or last_winner is None:
+                    win_streak_team2 += 1
+                    win_streak_team1 = 0
+                else:
+                    win_streak_team2 = 1
+                    win_streak_team1 = 0
+                last_winner = awayteam
 
-                home_total_score += home_score
-                away_total_score += away_score
+        # Recent stats
+        for match in recent_matches:
+            home = match["home_team"]
+            away = match["away_team"]
+            home_score = match["home_score"]
+            away_score = match["away_score"]
+            if home == hometeam:
+                team1_score = home_score
+                team2_score = away_score
+            else:
+                team1_score = away_score
+                team2_score = home_score
+            recent_team1_score += team1_score
+            recent_team2_score += team2_score
+            if team1_score > team2_score:
+                recent_team1_wins += 1
+            else:
+                recent_team2_wins += 1
 
-                # Win/Loss
-                if home_score > away_score:
-                    home_wins += 1
-                elif away_score > home_score:
-                    away_wins += 1
-                # Draws can be handled if needed
+        average_margin_team1 = sum(margins_team1) / len(margins_team1) if margins_team1 else 0
+        average_margin_team2 = sum(margins_team2) / len(margins_team2) if margins_team2 else 0
 
         return {
             "total_matches": total_matches,
-            f"{hometeam}_wins": home_wins,
-            f"{awayteam}_wins": away_wins,
-            f"{hometeam}_total_score": home_total_score,
-            f"{awayteam}_total_score": away_total_score,
-            f"{hometeam}_score_as_home": home_score_as_home,
-            f"{awayteam}_score_as_away": away_score_as_away,
+            f"{hometeam}_wins": team1_wins,
+            f"{awayteam}_wins": team2_wins,
+            f"{hometeam}_total_score": team1_total_score,
+            f"{awayteam}_total_score": team2_total_score,
+            f"{hometeam}_score_as_home": team1_score_as_home,
+            f"{awayteam}_score_as_away": team2_score_as_away,
+            f"{hometeam}_wins_as_home": team1_wins_as_home,
+            f"{hometeam}_wins_as_away": team1_wins_as_away,
+            f"{awayteam}_wins_as_home": team2_wins_as_home,
+            f"{awayteam}_wins_as_away": team2_wins_as_away,
+            f"recent_{hometeam}_wins": recent_team1_wins,
+            f"recent_{awayteam}_wins": recent_team2_wins,
+            f"recent_{hometeam}_score": recent_team1_score,
+            f"recent_{awayteam}_score": recent_team2_score,
+            f"{hometeam}_avg_margin": average_margin_team1,
+            f"{awayteam}_avg_margin": average_margin_team2,
+            f"{hometeam}_current_win_streak": win_streak_team1,
+            f"{awayteam}_current_win_streak": win_streak_team2,
+        }
+
+    def betting_algorithm(self, stats, hometeam, awayteam):
+        total_matches = stats["total_matches"]
+        if total_matches == 0:
+            return {"winner": None, "probabilities": {hometeam: 0.5, awayteam: 0.5}}
+
+        prob_range_from = 0
+        prob_range_to = 0
+        recent_n = 10
+
+        use_recent = total_matches >= recent_n
+        home_wins = stats[f"recent_{hometeam}_wins"] if use_recent else stats[f"{hometeam}_wins"]
+        away_wins = stats[f"recent_{awayteam}_wins"] if use_recent else stats[f"{awayteam}_wins"]
+
+        win_diff = abs(home_wins - away_wins)
+        
+        total = home_wins + away_wins
+        home_weight = home_wins / total
+        away_weight = away_wins / total
+        
+        winner = random.choices([hometeam, awayteam], weights=[home_weight, away_weight], k=1)[0]
+
+        if(win_diff <= 2):
+            prob_range_from = 0.51
+            prob_range_to = 0.65
+        elif(win_diff <= 6):
+            prob_range_from = 0.65
+            prob_range_to = 0.8
+        else:
+            prob_range_from = 0.8
+            prob_range_to = 0.95
+
+        winner_prob = round(random.uniform(prob_range_from, prob_range_to), 2)
+        loser_prob = 1 - winner_prob
+        
+        return {
+            "winner": winner,
+            "probabilities": {
+                hometeam: round(winner_prob, 2) if winner == hometeam else round(loser_prob, 2),
+                awayteam: round(winner_prob, 2) if winner == awayteam else round(loser_prob, 2)
+            }
         }
     
     async def make_prediction(self):
@@ -289,10 +404,19 @@ class SportstensorBaseModel(SportPredictionModel):
                         return
             
             stats = self.get_stats(home_team, away_team)
-            bt.logging.success(f"{stats}")
+            bt.logging.debug(f"Stats: {stats}")
+            result = self.betting_algorithm(stats, home_team, away_team)
+            bt.logging.debug(f"Betting algorithm result: {result}")
 
-            self.prediction.probabilityChoice = random.choice([ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
-            self.prediction.probability = 0.6 + random.uniform(0.0, 0.3)
+            if result["winner"] == home_team:
+                self.prediction.probabilityChoice = ProbabilityChoice.HOMETEAM
+                self.prediction.probability = result["probabilities"][home_team]
+            elif result["winner"] == away_team:
+                self.prediction.probabilityChoice = ProbabilityChoice.AWAYTEAM
+                self.prediction.probability = result["probabilities"][away_team]
+            else:
+                self.prediction.probabilityChoice = random.choice([ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
+                self.prediction.probability = round(random.uniform(0.51, 0.55), 2)
 
             # json_result = self.prediction.model_dump_json(indent=2)
             # with open("storage/miner_response.json", "w") as f:
