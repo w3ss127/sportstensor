@@ -36,12 +36,10 @@ async def mlb():
         matchDate=dt.datetime.strptime(matchDate, "%Y-%m-%d"),
         sport=Sport.BASEBALL,
         league=League.MLB,
-        # homeTeamName="Texas Rangers",
-        # awayTeamName="Baltimore Orioles",
-        # homeTeamName="Toronto Blue Jays",
-        # awayTeamName="New York Yankees",
-        homeTeamName="Philadelphia Phillies",
-        awayTeamName="San Diego Padres"
+        homeTeamName="Texas Rangers",
+        awayTeamName="Baltimore Orioles",
+        # homeTeamName="Philadelphia Phillies",
+        # awayTeamName="San Diego Padres"
     )
 
     match_prediction = await make_match_prediction(match_prediction)

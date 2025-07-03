@@ -37,7 +37,7 @@ mismatch_teams_mapping = {
     "Wolverhampton Wanderers": "Wolves",
     "Newcastle United": "Newcastle",
     "LA Galaxy": "L.A. Galaxy",
-    # "Oakland Athletics": "Athletics",
+    "Oakland Athletics": "Athletics",
 }
 
 SPORTS_TYPES = [
@@ -71,6 +71,7 @@ league_mapping = {
     'MLB': 'MLB',
 }
 
+
 class SportstensorBaseModel(SportPredictionModel):
     def __init__(self, prediction: MatchPrediction):
         super().__init__(prediction)
@@ -98,7 +99,8 @@ class SportstensorBaseModel(SportPredictionModel):
                         data = await response.json()
                         return data
                     else:
-                        print(f"\n=== API Error ===\nStatus: {response.status}")
+                        print(
+                            f"\n=== API Error ===\nStatus: {response.status}")
                         return None
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 print(f"\n=== API Exception ===\n{str(e)}")
@@ -133,14 +135,15 @@ class SportstensorBaseModel(SportPredictionModel):
 
             if draw_odds:
                 probabilities["draw"] = draw_prob / total
-            
+
             return probabilities
-        
+
         except Exception as e:
-            bt.logging.error(f"Error converting odds to probabilities: {str(e)}")
+            bt.logging.error(
+                f"Error converting odds to probabilities: {str(e)}")
             return None
 
-    def get_stats(self, hometeam, awayteam, json_path="storage/mlb.json", recent_n=10):
+    def get_stats(self, hometeam, awayteam, json_path="storage/mlb.json", recent_n=20):
         if not os.path.isfile(json_path):
             raise FileNotFoundError(f"Stats file not found: {json_path}")
 
@@ -164,8 +167,9 @@ class SportstensorBaseModel(SportPredictionModel):
         win_streak_team1 = win_streak_team2 = 0
 
         # For recent stats
-        recent_matches = h2h_matches[-recent_n:] if total_matches >= recent_n else h2h_matches
-        
+        recent_matches = h2h_matches[-recent_n:
+                                     ] if total_matches >= recent_n else h2h_matches
+
         recent_team1_wins = recent_team2_wins = 0
         recent_team1_score = recent_team2_score = 0
 
@@ -242,8 +246,10 @@ class SportstensorBaseModel(SportPredictionModel):
             else:
                 recent_team2_wins += 1
 
-        average_margin_team1 = sum(margins_team1) / len(margins_team1) if margins_team1 else 0
-        average_margin_team2 = sum(margins_team2) / len(margins_team2) if margins_team2 else 0
+        average_margin_team1 = sum(margins_team1) / \
+            len(margins_team1) if margins_team1 else 0
+        average_margin_team2 = sum(margins_team2) / \
+            len(margins_team2) if margins_team2 else 0
 
         return {
             "total_matches": total_matches,
@@ -267,69 +273,134 @@ class SportstensorBaseModel(SportPredictionModel):
             f"{awayteam}_current_win_streak": win_streak_team2,
         }
 
+    @staticmethod
+    def safe_div(a, b):
+        return a / b if b else 0
+
     def betting_algorithm(self, stats, hometeam, awayteam):
         total_matches = stats["total_matches"]
         if total_matches == 0:
             return {"winner": None, "probabilities": {hometeam: 0.5, awayteam: 0.5}}
 
-        prob_range_from = 0
-        prob_range_to = 0
-        recent_n = 10
+        recent_home_wins = stats[f"recent_{hometeam}_wins"]
+        recent_away_wins = stats[f"recent_{awayteam}_wins"]
+        total_home_wins = stats[f"{hometeam}_wins"]
+        total_away_wins = stats[f"{awayteam}_wins"]
+        recent_home_score = stats[f"recent_{hometeam}_score"]
+        recent_away_score = stats[f"recent_{awayteam}_score"]
+        total_home_score = stats[f"{hometeam}_total_score"]
+        total_away_score = stats[f"{awayteam}_total_score"]
+        home_wins_as_home = stats.get(f"{hometeam}_wins_as_home", 0)
+        away_wins_as_away = stats.get(f"{awayteam}_wins_as_away", 0)
 
-        use_recent = total_matches >= recent_n
-        home_wins = stats[f"recent_{hometeam}_wins"] if use_recent else stats[f"{hometeam}_wins"]
-        away_wins = stats[f"recent_{awayteam}_wins"] if use_recent else stats[f"{awayteam}_wins"]
+        # Calculate normalized factors
+        recent_win_factor_home = self.safe_div(
+            recent_home_wins, recent_home_wins + recent_away_wins)
+        recent_win_factor_away = self.safe_div(
+            recent_away_wins, recent_home_wins + recent_away_wins)
+        total_win_factor_home = self.safe_div(
+            total_home_wins, total_home_wins + total_away_wins)
+        total_win_factor_away = self.safe_div(
+            total_away_wins, total_home_wins + total_away_wins)
+        recent_score_factor_home = self.safe_div(
+            recent_home_score, recent_home_score + recent_away_score)
+        recent_score_factor_away = self.safe_div(
+            recent_away_score, recent_home_score + recent_away_score)
+        total_score_factor_home = self.safe_div(
+            total_home_score, total_home_score + total_away_score)
+        total_score_factor_away = self.safe_div(
+            total_away_score, total_home_score + total_away_score)
+        home_advantage_factor = self.safe_div(
+            home_wins_as_home, home_wins_as_home + away_wins_as_away)
+        away_advantage_factor = self.safe_div(
+            away_wins_as_away, home_wins_as_home + away_wins_as_away)
 
-        win_diff = abs(home_wins - away_wins)
-        
-        total = home_wins + away_wins
-        home_weight = home_wins / total
-        away_weight = away_wins / total
-        
-        winner = random.choices([hometeam, awayteam], weights=[home_weight, away_weight], k=1)[0]
+        # Assign weights to each factor (tune as needed)
+        w_recent_win = 0.5
+        w_total_win = 0.25
+        w_recent_score = 0.15
+        w_total_score = 0.05
+        w_home_advantage = 0.05
 
-        if(win_diff <= 2):
+        home_weight = (
+            w_recent_win * recent_win_factor_home +
+            w_total_win * total_win_factor_home +
+            w_recent_score * recent_score_factor_home +
+            w_total_score * total_score_factor_home +
+            w_home_advantage * home_advantage_factor
+        )
+        away_weight = (
+            w_recent_win * recent_win_factor_away +
+            w_total_win * total_win_factor_away +
+            w_recent_score * recent_score_factor_away +
+            w_total_score * total_score_factor_away +
+            w_home_advantage * away_advantage_factor
+        )
+        home_weight = round(home_weight, 3)
+        away_weight = round(away_weight, 3)
+
+        bt.logging.debug(
+            f"{hometeam} Weight: {home_weight}, {awayteam} Weight: {away_weight}")
+
+        winner = random.choices([hometeam, awayteam], weights=[
+                                home_weight, away_weight], k=1)[0]
+
+        win_diff = abs(home_weight - away_weight)
+        prob_range_from = prob_range_to = 0
+
+        if (win_diff <= 0.2):
             prob_range_from = 0.51
             prob_range_to = 0.65
-        elif(win_diff <= 6):
+        elif (win_diff <= 0.4):
             prob_range_from = 0.65
             prob_range_to = 0.8
-        else:
+        elif (win_diff <= 0.6):
             prob_range_from = 0.8
+            prob_range_to = 0.9
+        elif (win_diff <= 0.8):
+            prob_range_from = 0.9
             prob_range_to = 0.95
+        else:
+            prob_range_from = 0.95
+            prob_range_to = 0.99
 
         winner_prob = round(random.uniform(prob_range_from, prob_range_to), 2)
         loser_prob = 1 - winner_prob
-        
+
         return {
             "winner": winner,
             "probabilities": {
                 hometeam: round(winner_prob, 2) if winner == hometeam else round(loser_prob, 2),
-                awayteam: round(winner_prob, 2) if winner == awayteam else round(loser_prob, 2)
+                awayteam: round(winner_prob, 2) if winner == awayteam else round(
+                    loser_prob, 2)
             }
         }
-    
+
     async def make_prediction(self):
         """Synchronous wrapper for async prediction logic."""
         bt.logging.info(f"Predicting {self.prediction.league} game...")
-        
+
         try:
             # Convert the league to enum if it's not already one
             if not isinstance(self.prediction.league, League):
                 try:
-                    league_enum = get_league_from_string(str(self.prediction.league))
+                    league_enum = get_league_from_string(
+                        str(self.prediction.league))
                     if league_enum is None:
-                        bt.logging.error(f"Unknown league: {self.prediction.league}. Returning.")
+                        bt.logging.error(
+                            f"Unknown league: {self.prediction.league}. Returning.")
                     self.prediction.league = league_enum
                 except ValueError as e:
-                    bt.logging.error(f"Failed to convert league: {self.prediction.league}. Error: {e}")
+                    bt.logging.error(
+                        f"Failed to convert league: {self.prediction.league}. Error: {e}")
             else:
                 league_enum = self.prediction.league
 
             if not isinstance(self.prediction.league, League):
-                bt.logging.error(f"Invalid league type: {type(self.prediction.league)}. Expected League enum.")
+                bt.logging.error(
+                    f"Invalid league type: {type(self.prediction.league)}. Expected League enum.")
                 return self.prediction
-            
+
             # Dynamically determine sport_key
             league_to_sport_key = {
                 "NBA": "basketball_nba",
@@ -345,12 +416,14 @@ class SportstensorBaseModel(SportPredictionModel):
             sport_key = league_to_sport_key.get(league_key)
 
             if not sport_key:
-                bt.logging.error(f"Unknown league: {league_key}. Unable to determine sport_key.")
+                bt.logging.error(
+                    f"Unknown league: {league_key}. Unable to determine sport_key.")
                 return self.prediction
 
             # Determine the region (optional customization for regions)
-            region = "us,eu" if sport_key in ["baseball_mlb", "americanfootball_nfl", "basketball_nba"] else "uk,eu"
-            
+            region = "us,eu" if sport_key in [
+                "baseball_mlb", "americanfootball_nfl", "basketball_nba"] else "uk,eu"
+
             # odds_data = await self.fetch_odds(sport_key, region)
             odds_data = []
 
@@ -363,21 +436,25 @@ class SportstensorBaseModel(SportPredictionModel):
 
             # Find the match
             for odds in odds_data:
-                if  odds["home_team"] == home_team and odds["away_team"] == away_team:
-                    bookmaker = next((b for b in odds["bookmakers"] if b["key"] == "pinnacle"), None)
+                if odds["home_team"] == home_team and odds["away_team"] == away_team:
+                    bookmaker = next(
+                        (b for b in odds["bookmakers"] if b["key"] == "pinnacle"), None)
                     if not bookmaker:
                         bt.logging.error("No Pinnacle odds found")
                         continue
 
-                    market = next((m for m in bookmaker["markets"] if m["key"] == "h2h"), None)
+                    market = next(
+                        (m for m in bookmaker["markets"] if m["key"] == "h2h"), None)
                     if not market:
                         bt.logging.error("No h2h market found")
                         continue
 
-                    outcomes = {o["name"]: o["price"] for o in market["outcomes"]}
+                    outcomes = {o["name"]: o["price"]
+                                for o in market["outcomes"]}
                     home_odds = outcomes.get(home_team)
                     away_odds = outcomes.get(away_team)
-                    draw_odds = outcomes.get("Draw") if self.prediction.league in LEAGUES_ALLOWING_DRAWS else None
+                    draw_odds = outcomes.get(
+                        "Draw") if self.prediction.league in LEAGUES_ALLOWING_DRAWS else None
 
                     bt.logging.debug(f"Raw odds: {outcomes}")
 
@@ -385,12 +462,15 @@ class SportstensorBaseModel(SportPredictionModel):
                         bt.logging.error("Missing odds for one or both teams")
                         continue
 
-                    probabilities = self.odds_to_probabilities(home_odds, away_odds, draw_odds)
-                    bt.logging.debug(f"Calculated probabilities: {probabilities}")
+                    probabilities = self.odds_to_probabilities(
+                        home_odds, away_odds, draw_odds)
+                    bt.logging.debug(
+                        f"Calculated probabilities: {probabilities}")
 
                     if probabilities:
                         # Find the highest probability outcome
-                        max_prob = max(probabilities["home"], probabilities["away"], probabilities.get("draw", 0))
+                        max_prob = max(
+                            probabilities["home"], probabilities["away"], probabilities.get("draw", 0))
 
                         if max_prob == probabilities["home"]:
                             self.prediction.probabilityChoice = ProbabilityChoice.HOMETEAM
@@ -399,12 +479,15 @@ class SportstensorBaseModel(SportPredictionModel):
                         else:
                             self.prediction.probabilityChoice = ProbabilityChoice.DRAW
 
-                        self.prediction.probability = max_prob + random.uniform(self.boost_min_percent, self.boost_max_percent)
-                        bt.logging.info(f"Prediction made: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
+                        self.prediction.probability = max_prob + \
+                            random.uniform(self.boost_min_percent,
+                                           self.boost_max_percent)
+                        bt.logging.info(
+                            f"Prediction made: {self.prediction.probabilityChoice} with probability {self.prediction.probability}")
                         return
-            
+
             stats = self.get_stats(home_team, away_team)
-            bt.logging.debug(f"Stats: {stats}")
+            bt.logging.debug(f"Stats: {json.dumps(stats, indent=2)}")
             result = self.betting_algorithm(stats, home_team, away_team)
             bt.logging.debug(f"Betting algorithm result: {result}")
 
@@ -415,18 +498,16 @@ class SportstensorBaseModel(SportPredictionModel):
                 self.prediction.probabilityChoice = ProbabilityChoice.AWAYTEAM
                 self.prediction.probability = result["probabilities"][away_team]
             else:
-                self.prediction.probabilityChoice = random.choice([ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
-                self.prediction.probability = round(random.uniform(0.51, 0.55), 2)
+                self.prediction.probabilityChoice = random.choice(
+                    [ProbabilityChoice.HOMETEAM, ProbabilityChoice.AWAYTEAM])
+                self.prediction.probability = round(
+                    random.uniform(0.51, 0.55), 2)
 
             # json_result = self.prediction.model_dump_json(indent=2)
             # with open("storage/miner_response.json", "w") as f:
             #     json.dump(json_result, f, indent=2)
             # bt.logging.info(f"Sent Prediction Successfully: {json_result}")
-            
-            bt.logging.success(
-                f"Match Prediction for {self.prediction.awayTeamName} at {self.prediction.homeTeamName} on {self.prediction.matchDate}: {self.prediction.probabilityChoice} ({self.prediction.get_predicted_team()}) with wp {round(self.prediction.probability, 4)}"
-            )
             return
-            
+
         except Exception as e:
             bt.logging.error(f"Failed to make prediction: {str(e)}")
